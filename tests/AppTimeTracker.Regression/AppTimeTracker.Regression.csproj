@@ -8,6 +8,7 @@
   <ItemGroup>
     <Compile Include="../../AppTimeTracker/Models.cs" Link="Models.cs" />
     <Compile Include="../../AppTimeTracker/Csv.cs" Link="Csv.cs" />
+    <Compile Include="../../AppTimeTracker/UsageHistory.cs" Link="UsageHistory.cs" />
     <Compile Include="../../AppTimeTracker/Tracker.cs" Link="Tracker.cs" />
     <Compile Include="../../AppTimeTracker/Store.cs" Link="Store.cs" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.0" />

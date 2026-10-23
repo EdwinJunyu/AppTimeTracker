@@ -1,10 +1,10 @@
 # AppTimeTracker · 软件时钟
 
-简易中文 Windows x64 桌面计时器，记录软件窗口打开的时间。当前源码版本 1.1.3。本仓库包含核心源码、构建配置及使用说明。更新信息见 [CHANGELOG.md](CHANGELOG.md)。
+简易中文 Windows x64 桌面计时器，记录软件窗口打开的时间。当前源码版本 1.1.4。本仓库包含核心源码、构建配置及使用说明。更新信息见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 直接使用
 
-1. 按下方“从源码构建”生成发布目录，将整个目录放到长期保留的位置。自包含发布目录带有 .NET 10 运行环境，运行时无需安装 SDK 或 Python。
+1. 按下方“从源码构建”生成发布目录，将整个目录放到长期保留的位置。免安装版带有 .NET 10 运行环境；小型版需要先安装 .NET 10 Windows Desktop Runtime x64。两种版本均无需安装 SDK 或 Python。
 2. 双击 AppTimeTracker.exe。必须保留同目录的 DLL 和运行环境文件，不能只复制 EXE。
 3. 将软件 EXE 拖入界面，自动登记并启动；也可“添加软件”后等待软件打开，或点击“启动”。
 4. 关闭界面后在托盘继续监控；右键托盘选择“退出并保存”才停止。
@@ -83,13 +83,21 @@ dotnet build AppTimeTracker/AppTimeTracker.csproj -c Release --no-restore
 dotnet run --project AppTimeTracker/AppTimeTracker.csproj -c Release --no-build
 ```
 
-生成 Windows x64 自包含发布目录：
+提供两种 Windows x64 发布配置，功能、界面和数据目录相同：
+
+| 版本 | 配置 | 运行条件 | 输出目录 |
+|---|---|---|---|
+| 免安装版 | `Portable` | 自包含，附带运行环境 | `artifacts/AppTimeTracker-1.1.4-portable` |
+| 小型版 | `Small` | 预先安装 .NET 10 Windows Desktop Runtime x64 | `artifacts/AppTimeTracker-1.1.4-small` |
+
+分别运行以下命令生成发布目录：
 
 ```powershell
-dotnet publish AppTimeTracker/AppTimeTracker.csproj -c Release -r win-x64 --self-contained true -o artifacts/AppTimeTracker-1.1.3
+dotnet publish AppTimeTracker/AppTimeTracker.csproj -c Release -r win-x64 -p:PublishProfile=Portable
+dotnet publish AppTimeTracker/AppTimeTracker.csproj -c Release -r win-x64 -p:PublishProfile=Small
 ```
 
-生成的 EXE、DLL 和运行环境文件需要一起分发。旧版 PowerShell/BAT 脚本、开发过程记录、SDK 缓存和发布产物不包含在本仓库中。
+两个目录均需整体分发，不能只复制 EXE。小型版需要的是桌面运行时（Windows Desktop Runtime），仅安装 ASP.NET Core Runtime 不够。发布配置位于 `AppTimeTracker/Properties/PublishProfiles`，输出路径自动使用项目版本号。旧版脚本、开发过程记录、SDK 缓存和发布产物不包含在本仓库中。
 
 Linux 可使用 .NET 10 SDK 交叉构建和发布，在上述 restore、build、publish 命令中添加 `-p:EnableWindowsTargeting=true`。窗口、托盘及 Windows 会话监控仍需在 Windows 运行验证。
 

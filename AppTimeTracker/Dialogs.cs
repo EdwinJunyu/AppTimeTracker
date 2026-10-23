@@ -1,5 +1,4 @@
 using System.Drawing.Drawing2D;
-using System.Globalization;
 
 namespace AppTimeTracker;
 
@@ -14,7 +13,6 @@ public static class Ui
     public static readonly Color Success=Color.FromArgb(44,105,84);
     public static readonly Font Body=new("Microsoft YaHei UI",10);
     public static readonly Font Data=new("Consolas",10);
-    public static readonly Font Heading=new("Microsoft YaHei UI",24,FontStyle.Regular);
 
     public static void Style(Form form)
     {
@@ -278,7 +276,7 @@ public sealed class HistoryForm : Form
         }
         // 已移出配置的软件仍可按历史 ID 筛选；现有配置名称优先，软件名称相同也不合并 ID。
         var options=allApps.GroupBy(a=>a.Id).Select(g=>g.First()).ToList();
-        foreach(var row in Csv.Lifetime(snapshot()))if(options.All(a=>a.Id!=row.AppId))options.Add(new TrackedApp { Id=row.AppId,Name=row.Name,Removed=true });
+        foreach(var row in new UsageHistory(snapshot()).Lifetime())if(options.All(a=>a.Id!=row.AppId))options.Add(new TrackedApp { Id=row.AppId,Name=row.Name,Removed=true });
         // 每次打开都从所有软件开始，不继承主页选中项或上次筛选。
         apps.Items.Add("所有软件");foreach(var app in options)apps.Items.Add(app);apps.SelectedIndex=0;
         var filters=new TableLayoutPanel { Dock=DockStyle.Fill,ColumnCount=2,RowCount=1,Margin=Padding.Empty,BackColor=Color.Transparent };
@@ -337,13 +335,6 @@ public sealed class HistoryForm : Form
         using var editor=new SessionNoteEditor(session,saveNote);
         if(editor.ShowDialog(this)==DialogResult.OK){RefreshRows(id);pageLabel.Text+=" · 备注已保存";}
     }
-    private List<UsageSession> Filtered()
-    {
-        var id=(apps.SelectedItem as TrackedApp)?.Id;var rows=Csv.Latest(snapshot()).Where(s=>id==null||s.AppId==id);
-        // 累计视图始终使用全部历史，隐藏的日期即使倒序也不影响查看和导出。
-        if(mode=="lifetime")return rows.OrderByDescending(s=>s.Start).ToList();
-        ValidateDates();return Csv.Filter(rows,DateOnly.FromDateTime(from.Value),DateOnly.FromDateTime(to.Value)).OrderByDescending(s=>s.Start).ToList();
-    }
     private void ValidateDates()
     {
         if(from.Value.Date>to.Value.Date)throw new ArgumentException("结束日期不能早于开始日期，请调整日期范围。");
@@ -354,20 +345,17 @@ public sealed class HistoryForm : Form
         {
             if(mode!="lifetime")ValidateDates();
             // 预览和导出均按软件 ID 累计，日期只影响明细或每日片段，不改变总时长。
-            var all=Csv.Latest(snapshot());var id=(apps.SelectedItem as TrackedApp)?.Id;var totals=Csv.Lifetime(all).ToDictionary(x=>x.AppId,x=>x.Seconds);var display=new List<object[]>();var sessionIds=new List<string>();
+            var history=new UsageHistory(snapshot(),(apps.SelectedItem as TrackedApp)?.Id);var display=new List<object[]>();var sessionIds=new List<string>();
             if(mode=="lifetime")
-                foreach(var row in Csv.Lifetime(all,id))display.Add([row.Name,row.FirstRecorded.ToString("yyyy-MM-dd HH:mm:ss"),row.LastRecorded.ToString("yyyy-MM-dd HH:mm:ss"),row.SessionCount,Csv.Duration(row.Seconds),row.Note]);
+                foreach(var row in history.Lifetime())display.Add([row.Name,row.FirstRecorded.ToString("yyyy-MM-dd HH:mm:ss"),row.LastRecorded.ToString("yyyy-MM-dd HH:mm:ss"),row.SessionCount,Csv.Duration(row.Seconds),row.Note]);
             else if(mode=="daily")
             {
-                var first=DateOnly.FromDateTime(from.Value);var last=DateOnly.FromDateTime(to.Value);
-                var groups=all.Where(s=>id==null||s.AppId==id).SelectMany(s=>s.Segments.Select(p=>new {Session=s,Segment=p}))
-                    .Where(x=>DateOnly.ParseExact(x.Segment.Day,"yyyy-MM-dd",CultureInfo.InvariantCulture)>=first&&DateOnly.ParseExact(x.Segment.Day,"yyyy-MM-dd",CultureInfo.InvariantCulture)<=last)
-                    .GroupBy(x=>new {x.Segment.Day,x.Session.AppId}).OrderByDescending(x=>x.Key.Day).ThenBy(x=>x.Key.AppId);
-                foreach(var row in groups)display.Add([row.Key.Day,row.OrderBy(x=>x.Session.LastObserved).Last().Session.Name,Csv.Duration(row.Sum(x=>x.Segment.Seconds)),row.Select(x=>x.Session.Id).Distinct().Count(),Csv.Duration(totals[row.Key.AppId]),Csv.SingleSessionNote(row.Select(x=>x.Session))]);
+                foreach(var row in history.Daily(DateOnly.FromDateTime(from.Value),DateOnly.FromDateTime(to.Value)).OrderByDescending(x=>x.Day).ThenBy(x=>x.AppId))
+                    display.Add([row.Day,row.Name,Csv.Duration(row.Seconds),row.SessionCount,Csv.Duration(row.TotalSeconds),row.Note]);
             }
             else
-                foreach(var s in Csv.Filter(all.Where(s=>id==null||s.AppId==id),DateOnly.FromDateTime(from.Value),DateOnly.FromDateTime(to.Value)).OrderByDescending(s=>s.Start))
-                { sessionIds.Add(s.Id);display.Add([s.Name,s.Start.ToString("yyyy-MM-dd HH:mm:ss zzz"),s.End?.ToString("yyyy-MM-dd HH:mm:ss zzz")??"进行中",Csv.Duration(s.Seconds),Csv.Duration(totals[s.AppId]),s.End==null?"进行中":Csv.Reason(s.Reason),s.Note]); }
+                foreach(var s in history.Details(DateOnly.FromDateTime(from.Value),DateOnly.FromDateTime(to.Value)).OrderByDescending(s=>s.Start))
+                { sessionIds.Add(s.Id);display.Add([s.Name,s.Start.ToString("yyyy-MM-dd HH:mm:ss zzz"),s.End?.ToString("yyyy-MM-dd HH:mm:ss zzz")??"进行中",Csv.Duration(s.Seconds),Csv.Duration(history.Totals[s.AppId]),s.End==null?"进行中":Csv.Reason(s.Reason),s.Note]); }
             page=Math.Clamp(page,0,Math.Max(0,(display.Count-1)/50));grid.Rows.Clear();
             foreach(var i in Enumerable.Range(page*50,Math.Min(50,display.Count-page*50)))
             {
@@ -393,20 +381,14 @@ public sealed class HistoryForm : Form
     }
     private void ExportCurrent()
     {
-        if(mode=="lifetime")ExportRecords("lifetime");else Export(mode=="daily");
-    }
-    // 保留原有明细/每日入口，当前视图只显示一个明确对应的导出按钮。
-    private void Export(bool daily)=>ExportRecords(daily?"daily":"detail");
-    private void ExportRecords(string recordType)
-    {
-        if(recordType!="lifetime"&&from.Value.Date>to.Value.Date){RefreshRows();return;}
+        if(mode!="lifetime"&&from.Value.Date>to.Value.Date){RefreshRows();return;}
         try
         {
-            var name=recordType=="lifetime"?"累计汇总":recordType=="daily"?"每日汇总":"会话明细";
+            var name=mode=="lifetime"?"累计汇总":mode=="daily"?"每日汇总":"会话明细";
             using var dialog=new SaveFileDialog { Filter="CSV 文件 (*.csv)|*.csv",FileName=name+".csv",OverwritePrompt=true };
             if(dialog.ShowDialog(this)!=DialogResult.OK)return;var id=(apps.SelectedItem as TrackedApp)?.Id;
-            if(recordType=="lifetime")Csv.ExportLifetime(dialog.FileName,snapshot(),id);
-            else Csv.Export(dialog.FileName,snapshot(),recordType=="daily",DateOnly.FromDateTime(from.Value),DateOnly.FromDateTime(to.Value),id);
+            if(mode=="lifetime")Csv.ExportLifetime(dialog.FileName,snapshot(),id);
+            else Csv.Export(dialog.FileName,snapshot(),mode=="daily",DateOnly.FromDateTime(from.Value),DateOnly.FromDateTime(to.Value),id);
             pageLabel.Text="导出完成："+dialog.FileName;
         }
         catch(Exception ex){Ui.Error(this,ex);}

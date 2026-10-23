@@ -14,3 +14,8 @@
 /AppTimeTracker/*
 !/AppTimeTracker/*.cs
 !/AppTimeTracker/AppTimeTracker.csproj
+!/AppTimeTracker/Properties/
+/AppTimeTracker/Properties/*
+!/AppTimeTracker/Properties/PublishProfiles/
+/AppTimeTracker/Properties/PublishProfiles/*
+!/AppTimeTracker/Properties/PublishProfiles/*.pubxml

@@ -45,7 +45,7 @@ components:
 
 ## Typography
 
-`Ui.Body` 为 Microsoft YaHei UI 10pt，`Ui.Heading` 为同字体 24pt；时长列沿用 `Ui.Data` 的 Consolas 10pt 和右对齐。前置 token 仅记录字体族，保留运行时以 point 为单位的字号，避免引入第二套像素换算值。备注是中文正文，不使用数字字体。标题和说明按字体首选高度布局，并随系统 DPI 缩放。完整长备注通过可滚动多行编辑器访问，不只依赖悬停提示。
+`Ui.Body` 为 Microsoft YaHei UI 10pt，`Ui.Title` 默认使用同字体 24pt；时长列沿用 `Ui.Data` 的 Consolas 10pt 和右对齐。前置 token 仅记录字体族，保留运行时以 point 为单位的字号，避免引入第二套像素换算值。备注是中文正文，不使用数字字体。标题和说明按字体首选高度布局，并随系统 DPI 缩放。完整长备注通过可滚动多行编辑器访问，不只依赖悬停提示。
 
 ## Layout
 
@@ -64,7 +64,7 @@ components:
 | 本文件 token / 组件 | 运行时所有者 | 消费者 |
 |---|---|---|
 | colors | `Ui` 静态颜色字段 | `Ui.Style`、按钮、表格、文字 |
-| typography | `Ui.Body`、`Ui.Heading`、`Ui.Data` | 标题、输入、表格、时长 |
+| typography | `Ui.Body`、`Ui.Title`、`Ui.Data` | 标题、输入、表格、时长 |
 | rounded.button | `Ui.GlassButton.OnPaint` | `Ui.Button`、`Ui.PrimaryButton` |
 | rounded.surface、spacing.surface-padding | `Ui.Surface` | 各窗体表面 |
 | spacing.form-padding | `AppEditor`、`HistoryForm` 布局 | 对话框布局 |

@@ -21,7 +21,11 @@ var tests = new (string Name, Action Run)[]
     ("时钟回拨后选择实际最近会话", RecentAfterClockRollback),
     ("相同时间按创建顺序选择且软件独立", RecentWithEqualTimes),
     ("创建顺序持久化并在重启后继续", RecentAfterRestart),
-    ("旧数据库按入库顺序兼容且编辑不改顺序", LegacyCreationOrder)
+    ("旧数据库按入库顺序兼容且编辑不改顺序", LegacyCreationOrder),
+    ("共享查询与三种 CSV 在各筛选下一致", SharedHistoryCsv),
+    ("共享查询保留回拨及零秒会话筛选", HistoryBoundaryDates),
+    ("空历史导出保留表头", EmptyHistoryCsv),
+    ("导出不受界面每页五十条限制", ExportAllPages)
 };
 var failures = 0;
 foreach (var test in tests)
@@ -170,7 +174,7 @@ static void SingleSessionSummary() => Temp(dir =>
     var path = Path.Combine(dir, "single.csv"); Csv.Export(path, [session], true, Day(), Day(), null);
     var rows = ReadCsv(path); Equal("同一任务", rows[1][^1]); Equal("1", rows[1][Index(rows, "会话数")]); Equal("00:01:30", rows[1][Index(rows, "有效时长")]);
     var latest = session.Snapshot(); latest.Note = "最新修改";
-    Equal("最新修改", Csv.SingleSessionNote([session, latest]));
+    Equal("最新修改", UsageHistory.SingleSessionNote([session, latest]));
 });
 static void DateFilter() => Temp(dir =>
 {
@@ -266,6 +270,67 @@ static void LegacyCreationOrder() => Temp(dir =>
         tracker.Observe([app], new HashSet<string> { "editor.exe" }, newer.Start, 0, false);
         Equal(true, tracker.Active[app.Id].CreationOrder > rows.Max(s => s.CreationOrder));
     }
+});
+static void SharedHistoryCsv() => Temp(dir =>
+{
+    var first = Session(note: "旧备注"); var current = first.Snapshot(); current.Note = "最新备注"; current.End = null;
+    var sessions = new[] { first, current, Session("s2", note: "第二次", seconds: 90), Session("old", day: 22), Session("other", "a2", "其他软件", 15) };
+    var path = Path.Combine(dir, "shared.csv");
+    foreach (var appId in new string?[] { null, "a1", "a2", "missing" })
+    foreach (var date in new[] { Day(), Day(22) })
+    {
+        var history = new UsageHistory(sessions, appId);
+        Csv.Export(path, sessions, false, date, date, appId); var csv = ReadCsv(path);
+        var details = history.Details(date, date).OrderBy(s => s.Start).ToList(); Equal(details.Count + 1, csv.Count);
+        for (var i = 0; i < details.Count; i++)
+        {
+            Equal(details[i].Id, csv[i + 1][0]); Equal(details[i].Note, csv[i + 1][^1]);
+            Equal(Csv.Duration(history.Totals[details[i].AppId]), csv[i + 1][Index(csv, "总时长")]);
+        }
+        Csv.Export(path, sessions, true, date, date, appId); csv = ReadCsv(path);
+        var daily = history.Daily(date, date).OrderBy(s => s.Day).ToList(); Equal(daily.Count + 1, csv.Count);
+        for (var i = 0; i < daily.Count; i++)
+        {
+            Equal(daily[i].Day, csv[i + 1][0]); Equal(daily[i].AppId, csv[i + 1][1]); Equal(daily[i].Note, csv[i + 1][^1]);
+            Equal(Csv.Duration(daily[i].Seconds), csv[i + 1][Index(csv, "有效时长")]);
+            Equal(Csv.Duration(daily[i].TotalSeconds), csv[i + 1][Index(csv, "总时长")]);
+        }
+        Csv.ExportLifetime(path, sessions, appId); csv = ReadCsv(path);
+        var lifetime = history.Lifetime(); Equal(lifetime.Count + 1, csv.Count);
+        for (var i = 0; i < lifetime.Count; i++)
+        {
+            Equal(lifetime[i].AppId, csv[i + 1][0]); Equal(lifetime[i].Note, csv[i + 1][^1]);
+            Equal(lifetime[i].SessionCount.ToString(), csv[i + 1][Index(csv, "会话数")]);
+            Equal(Csv.Duration(lifetime[i].Seconds), csv[i + 1][Index(csv, "总时长")]);
+        }
+    }
+});
+static void HistoryBoundaryDates()
+{
+    var reverse = Session("reverse", day: 24); reverse.End = reverse.Start.AddDays(-2); reverse.Segments.Clear();
+    var known = reverse.Snapshot(); known.Id = "known";
+    known.Segments.Add(new TimeSegment { Day = "2026-10-23", Start = Session().Start, End = Session().Start.AddSeconds(5), Seconds = 5 });
+    var zero = Session("zero", seconds: 0); zero.Segments.Clear();
+    var history = new UsageHistory([reverse, known, zero]);
+    var middle = history.Details(Day(), Day()).Select(s => s.Id).ToList();
+    Equal(false, middle.Contains(reverse.Id)); Equal(true, middle.Contains(known.Id)); Equal(true, middle.Contains(zero.Id));
+    Equal(true, history.Details(Day(22), Day(22)).Any(s => s.Id == reverse.Id));
+    Equal(true, history.Details(Day(24), Day(24)).Any(s => s.Id == reverse.Id));
+    var daily = history.Daily(Day(), Day()).Single(); Equal(5d, daily.Seconds); Equal("写方案", daily.Note);
+}
+static void EmptyHistoryCsv() => Temp(dir =>
+{
+    var history = new UsageHistory([]); var path = Path.Combine(dir, "empty.csv");
+    Equal(0, history.Totals.Count); Equal(0, history.Details(Day(), Day()).Count()); Equal(0, history.Daily(Day(), Day()).Count()); Equal(0, history.Lifetime().Count);
+    foreach (var daily in new[] { false, true }) { Csv.Export(path, [], daily, Day(), Day(), null); Equal(1, ReadCsv(path).Count); }
+    Csv.ExportLifetime(path, [], null); Equal(1, ReadCsv(path).Count);
+});
+static void ExportAllPages() => Temp(dir =>
+{
+    var sessions = Enumerable.Range(0, 60).Select(i => Session("page-" + i, note: "备注 " + i)).ToList();
+    var history = new UsageHistory(sessions); Equal(60, history.Details(Day(), Day()).Count());
+    var path = Path.Combine(dir, "all-pages.csv"); Csv.Export(path, sessions, false, Day(), Day(), null);
+    Equal(61, ReadCsv(path).Count);
 });
 static int Index(List<string[]> rows, string name)
 {

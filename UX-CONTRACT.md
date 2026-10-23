@@ -19,7 +19,7 @@
 |---|---|---|---|---|
 | Table Selection | `Ui.Grid` 与各窗体的选中记录 ID | 本约定与 `Dialogs.cs` | 原生整行单选；主页软件、历史会话 | Windows 键盘、刷新后选择与编辑目标 |
 | Select/Listbox | Windows `ComboBox` | `HistoryForm` | 原生下拉；平台拥有弹出层几何与键盘行为 | Windows 下拉打开、选项选择、Escape |
-| Date | Windows `DateTimePicker` | `HistoryForm` 与 `Csv.Filter` | 原生日期选择；年月日格式，累计视图忽略日期 | 日期边界、倒序日期提示与 CSV 一致性 |
+| Date | Windows `DateTimePicker` | `HistoryForm` 与 `UsageHistory.Details` / `Daily` | 原生日期选择；年月日格式，累计视图忽略日期 | 日期边界、倒序日期提示与 CSV 一致性 |
 | Form | `AppEditor`、共享 `SessionNoteEditor` | 本约定 | 软件配置编辑、会话备注编辑 | 保存、取消、空值、保存失败保留输入 |
 | Scrollbar | Windows 原生控件 | `Ui.Grid`、多行 `TextBox` | 表格水平/垂直滚动、备注垂直滚动 | Windows 窄窗体及长备注 |
 | Toast | 既有窗体状态区域与内联错误 | `MainForm` 状态栏、编辑器错误、历史状态 | 本地成功反馈、持续错误 | 保存完成才显示成功；失败可重试 |
@@ -40,6 +40,7 @@
 - 明细与每日遵循现有日期范围，累计覆盖全部历史。筛选变化回到第一页；每页 50 行；无结果与无记录均显示可操作说明。
 - 三种 CSV 均增加“备注”列。明细逐会话填写；汇总恰好代表一次会话时可填该次备注，涉及多次会话时留空，绝不拼接、覆盖或任意挑选备注。界面预览使用同一规则，并提示从会话明细查看逐次备注。
 - CSV 保持 UTF-8 BOM、双引号/逗号/换行转义及公式注入保护；更新备注不能改变累计、日期过滤或软件 ID 身份规则。
+- `UsageHistory` 统一负责会话去重、软件与日期筛选、全部历史累计、每日分组及备注汇总；历史界面和 CSV 使用同一查询结果，只分别处理显示格式、行顺序与分页。分页不限制导出的记录数量。
 
 ## 可用性与验证边界
 
