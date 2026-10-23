@@ -1,0 +1,10 @@
+# 仅跟踪当前桌面应用的核心源码、构建配置及使用说明。
+# 测试、旧脚本、构建缓存和发布产物保留本地，不上传远程仓库。
+/*
+!/.gitignore
+!/README.md
+!/NuGet.Config
+!/AppTimeTracker/
+/AppTimeTracker/*
+!/AppTimeTracker/*.cs
+!/AppTimeTracker/AppTimeTracker.csproj
