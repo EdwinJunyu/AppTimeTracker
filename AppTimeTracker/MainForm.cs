@@ -7,8 +7,9 @@ public sealed class MainForm : Form
 {
     private readonly Store store;
     private readonly List<TrackedApp> apps;
-    private readonly Tracker tracker=new();
+    private readonly Tracker tracker;
     private readonly Dictionary<string,UsageSession> history;
+    private Dictionary<string,UsageSession> recentSessions=[];
     private readonly Stopwatch clock=Stopwatch.StartNew();
     private readonly System.Windows.Forms.Timer timer=new() { Interval=1000 };
     private readonly NotifyIcon tray=new() { Icon=SystemIcons.Application,Text="AppTimeTracker",Visible=true };
@@ -21,6 +22,7 @@ public sealed class MainForm : Form
     private readonly Label selectionCaption=Ui.Muted("选择一个软件");
     private readonly List<Button> selectionButtons=[];
     private Button? toggleButton;
+    private Button? noteButton;
     private bool locked,suspended,quit,exiting,starting=true,changingAutostart;
     private readonly bool startInTray,systemIntegration;
     private double lastSave,saveStarted;
@@ -32,6 +34,7 @@ public sealed class MainForm : Form
     public MainForm(Store store,bool startInTray,EventWaitHandle wake,bool systemIntegration=true,Func<bool?>? sessionState=null)
     {
         this.store=store;this.wake=wake;this.startInTray=startInTray;this.systemIntegration=systemIntegration;apps=store.Apps();history=store.Sessions().ToDictionary(s=>s.Id);
+        tracker=new Tracker(history.Values);
         readSessionLocked=sessionState??(systemIntegration?WindowsIntegration.SessionLocked:()=>null);
         // 旧配置也应用统一路径规则，避免更新后仍无法识别带扩展前缀的记录。
         foreach(var app in apps) NormalizePaths(app);
@@ -44,7 +47,7 @@ public sealed class MainForm : Form
         foreach(var height in new[]{60,56}) root.RowStyles.Add(new RowStyle(SizeType.Absolute,height));
         root.RowStyles.Add(new RowStyle(SizeType.Percent,100));
         foreach(var height in new[]{64,36,38}) root.RowStyles.Add(new RowStyle(SizeType.Absolute,height));
-        void OpenHistory(){Safe(()=>{using var dialog=new HistoryForm(Snapshot,apps,Selected()?.Id);dialog.ShowDialog(this);});}
+        void OpenHistory(){Safe(()=>{using var dialog=new HistoryForm(Snapshot,apps,SaveNote);dialog.ShowDialog(this);RefreshGrid();});}
         var navigation=new FlowLayoutPanel { Dock=DockStyle.Fill,BackColor=Color.Transparent,WrapContents=false,Margin=Padding.Empty };
         var activeTab=Ui.Muted("软件监控");activeTab.ForeColor=SystemInformation.HighContrast?SystemColors.HotTrack:Ui.Accent;activeTab.Padding=new Padding(4,8,18,0);
         navigation.Controls.Add(activeTab);
@@ -80,17 +83,19 @@ public sealed class MainForm : Form
         void SelectedButton(string text,Action<TrackedApp> action)
         { var b=Ui.Button(text,(_,_)=>{ var a=Selected();if(a!=null) Safe(()=>action(a)); }); selectionButtons.Add(b);actions.Controls.Add(b); }
         SelectedButton("启动",Launch);SelectedButton("编辑…",Edit);
+        SelectedButton("编辑备注…",EditNote);noteButton=selectionButtons[^1];
         SelectedButton("停用监控",a=>{var copy=Copy(a);copy.Enabled=!copy.Enabled;Commit(copy);});toggleButton=selectionButtons[^1];
         SelectedButton("移出列表",a=>{
             if(MessageBox.Show(this,$"将“{a.Name}”移出监控列表？\n历史记录与累计时间会保留。重新添加相同路径可恢复。","移出列表",MessageBoxButtons.OKCancel,MessageBoxIcon.Question,MessageBoxDefaultButton.Button2)!=DialogResult.OK)return;
             var copy=Copy(a);copy.Removed=true;Commit(copy);
         });
         root.Controls.Add(actions,0,5);
-        foreach(var title in new[]{"软件","状态","本次时长","今日时长","累计时长"})Ui.Column(grid,title);
+        foreach(var title in new[]{"软件","状态","本次时长","今日时长","累计时长","计时备注"})Ui.Column(grid,title);
         grid.Columns[0].FillWeight=170;grid.Columns[1].FillWeight=115;
+        grid.Columns[5].FillWeight=200;grid.Columns[5].MinimumWidth=220;
         for(var i=2;i<5;i++){grid.Columns[i].DefaultCellStyle.Alignment=DataGridViewContentAlignment.MiddleRight;grid.Columns[i].HeaderCell.Style.Alignment=DataGridViewContentAlignment.MiddleRight;}
         grid.SelectionChanged+=(_,_)=>UpdateButtons();
-        grid.CellDoubleClick+=(_,e)=>{if(e.RowIndex>=0&&Selected() is {} a)Safe(()=>Launch(a));};
+        grid.CellDoubleClick+=(_,e)=>{if(e.RowIndex>=0&&Selected() is {} a)Safe(()=>{if(e.ColumnIndex==5)EditNote(a);else Launch(a);});};
         var tableSurface=Ui.Surface();tableSurface.Dock=DockStyle.Fill;tableSurface.Margin=new Padding(0);tableSurface.Padding=new Padding(10);
         tableSurface.Controls.Add(grid);root.Controls.Add(tableSurface,0,4);
         autostart.BackColor=Color.Transparent;autostart.ForeColor=SystemInformation.HighContrast?SystemColors.WindowText:Ui.MutedInk;
@@ -155,6 +160,11 @@ public sealed class MainForm : Form
         var selected=Selected();foreach(var b in selectionButtons)b.Enabled=selected!=null&&!exiting;
         selectionCaption.Text=selected==null?"选择一个软件":"已选择 "+selected.Name;
         if(toggleButton!=null){toggleButton.Text=selected?.Enabled==false?"启用监控":"停用监控";toggleButton.AccessibleName=toggleButton.Text;}
+        if(noteButton!=null)
+        {
+            noteButton.Enabled=selected!=null&&!exiting&&NoteSession(selected.Id)!=null;
+            noteButton.AccessibleDescription="编辑本次计时的备注；尚未开始新计时时，可编辑最近一次计时的备注。更早记录请打开历史与导出。";
+        }
     }
     private void UpdateAutostart()
     {
@@ -252,14 +262,35 @@ public sealed class MainForm : Form
         foreach(var s in tracker.Active.Values)all[s.Id]=s;
         return all.Values.ToList();
     }
+    private UsageSession? NoteSession(string appId)=>tracker.Active.GetValueOrDefault(appId)??recentSessions.GetValueOrDefault(appId);
+    private void EditNote(TrackedApp app)
+    {
+        if(NoteSession(app.Id) is not {} session)return;
+        using var editor=new SessionNoteEditor(session,SaveNote);
+        editor.ShowDialog(this);RefreshGrid();
+    }
+    private void SaveNote(string sessionId,string note)
+    {
+        // 先收齐旧的后台快照，再保存最新会话，避免旧备注或累计覆盖本次编辑。
+        CompleteSave(true);
+        var session=Snapshot().FirstOrDefault(s=>s.Id==sessionId)??throw new InvalidOperationException("找不到这次计时记录，请关闭编辑窗口并刷新后重试。");
+        var updated=session.Snapshot();updated.Note=note;
+        // 保存成功后才更新界面与待写对象；失败时编辑窗口保留输入，可直接重试。
+        store.SaveSessions([updated]);
+        session.Note=note;history[session.Id]=session;
+        if(tracker.Pending.ContainsKey(session.Id))tracker.Pending[session.Id]=session;
+        RefreshGrid();
+        status.Text="备注已保存。";
+    }
     private void RefreshGrid()
     {
         var selected=Selected()?.Id;
         var visible=apps.Where(a=>!a.Removed).ToList();
         var today=DateTime.Now.ToString("yyyy-MM-dd");
         var totals=new Dictionary<string,(double Today,double Total)>();
+        var sessions=Snapshot();recentSessions=UsageSession.RecentByApp(sessions);
         // 历史只遍历一次，避免每一行软件都重新过滤全部会话；亚秒数先相加再格式化。
-        foreach(var session in Snapshot())
+        foreach(var session in sessions)
         {
             var sum=totals.GetValueOrDefault(session.AppId);
             sum.Total+=session.Seconds;
@@ -278,7 +309,9 @@ public sealed class MainForm : Form
             var valid=Exists(a.LaunchPath)&&a.MonitorPaths.All(Exists);
             var state=!a.Enabled?"已停用":!valid?"路径失效，请编辑":current!=null?(locked||suspended?"已暂停":"计时中"):"等待窗口";
             var sum=totals.GetValueOrDefault(a.Id);
-            object[] values=[a.Name,state,Csv.Duration(current?.Seconds??0),Csv.Duration(sum.Today),Csv.Duration(sum.Total)];
+            var noteSession=NoteSession(a.Id);
+            var note=noteSession==null?"尚无计时记录":(current!=null?"本次：":"最近一次：")+(string.IsNullOrEmpty(noteSession.Note)?"未填写":noteSession.Note);
+            object[] values=[a.Name,state,Csv.Duration(current?.Seconds??0),Csv.Duration(sum.Today),Csv.Duration(sum.Total),note];
             for(var i=0;i<values.Length;i++)if(!Equals(row.Cells[i].Value,values[i]))row.Cells[i].Value=values[i];
             if(a.Id==selected)row.Selected=true;
         }

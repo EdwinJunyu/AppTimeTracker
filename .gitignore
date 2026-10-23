@@ -1,9 +1,15 @@
 # 仅跟踪当前桌面应用的核心源码、构建配置及使用说明。
-# 测试、旧脚本、构建缓存和发布产物保留本地，不上传远程仓库。
+# 核心回归测试随源码保留；旧脚本、构建缓存和发布产物保留本地。
 /*
 !/.gitignore
 !/README.md
+!/CHANGELOG.md
 !/NuGet.Config
+!/DESIGN.md
+!/UX-CONTRACT.md
+!/tests/
+/tests/**/bin/
+/tests/**/obj/
 !/AppTimeTracker/
 /AppTimeTracker/*
 !/AppTimeTracker/*.cs

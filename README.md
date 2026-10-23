@@ -1,6 +1,6 @@
 # AppTimeTracker · 软件时钟
 
-简易中文 Windows x64 桌面计时器，记录软件窗口打开的时间。当前源码版本 1.1.2。本仓库包含核心源码、构建配置及使用说明。
+简易中文 Windows x64 桌面计时器，记录软件窗口打开的时间。当前源码版本 1.1.3。本仓库包含核心源码、构建配置及使用说明。更新信息见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 直接使用
 
@@ -33,6 +33,16 @@
 
 普通路径与 Windows 扩展盘符、扩展 UNC 路径使用一致的匹配规则。编辑软件时如与另一条记录的启动路径冲突，会明确拒绝保存并保留原 ID；恢复旧记录请使用添加操作。
 
+## 计时备注
+
+每个软件的每次计时有一条独立备注，可留空。主页“计时备注”列标明本次或最近一次的备注；选中软件后点击“编辑备注…”即可填写或修改，双击备注单元格也可打开。计时进行中、暂停或结束后均可编辑，不改变自动计时规则。尚无计时记录时不可填写，开始新一次计时不会沿用上一次备注。
+
+在“历史与导出”的“会话明细”中选中记录，点击“编辑备注…”或双击该行，可补写或修改更早的备注。备注支持中文及多行，点击“保存备注”后存入当前用户数据库；保存失败会保留编辑内容供重试。取消或关闭编辑窗口不会保存修改。
+
+导出窗口每次打开都默认“所有软件”，显示当前日期范围内的记录，不继承主页选中项或上次的单软件筛选。CSV 跟随界面当前的视图、日期及软件筛选，包含全部符合条件的记录，不限于当前页。累计汇总仍包含全部历史，不受日期范围限制。
+
+三种视图和 CSV 均新增“备注”列。会话明细逐条显示各次备注；每日及累计汇总只有在一行对应一次计时时显示该备注，涉及多次计时时留空，不合并或任选某一条备注。需要查看每次备注时请使用会话明细。
+
 ## 数据与 CSV
 
 数据库位于 `%LocalAppData%\AppTimeTracker\usage.db`。配置、会话、有效区间存入 SQLite，累计从明细计算，界面包含未到周期保存点的增量。
@@ -47,9 +57,9 @@
 
 | 类型 | 字段 |
 |---|---|
-| 会话明细 | 会话/软件 ID、名称、启动/监控路径、计时类型、开始/结束时间、时区、有效时长、已确认暂停时长、总时长、状态、结束原因、异常恢复标记 |
-| 每日汇总 | 日期、软件 ID、名称、计时类型、当天有效时长、当天有活动的会话数、总时长 |
-| 累计汇总 | 软件 ID、名称、计时类型、首次/最近记录时间、会话数、总时长 |
+| 会话明细 | 会话/软件 ID、名称、启动/监控路径、计时类型、开始/结束时间、时区、有效时长、已确认暂停时长、总时长、状态、结束原因、异常恢复标记、备注 |
+| 每日汇总 | 日期、软件 ID、名称、计时类型、当天有效时长、当天有活动的会话数、总时长、备注 |
+| 累计汇总 | 软件 ID、名称、计时类型、首次/最近记录时间、会话数、总时长、备注 |
 
 所有时长采用 HH:mm:ss，例如 01:02:03；小时可超过 24，例如 126:42:10。按累计秒数取整显示，数据库仍保留原有精度。时间戳含偏移，正确转义引号、逗号、换行；可能被 Excel 当作公式的文本添加保护前缀。进行中会话结束时间为空，未知暂停时长为空。
 
@@ -76,7 +86,18 @@ dotnet run --project AppTimeTracker/AppTimeTracker.csproj -c Release --no-build
 生成 Windows x64 自包含发布目录：
 
 ```powershell
-dotnet publish AppTimeTracker/AppTimeTracker.csproj -c Release -r win-x64 --self-contained true -o artifacts/AppTimeTracker-1.1.2
+dotnet publish AppTimeTracker/AppTimeTracker.csproj -c Release -r win-x64 --self-contained true -o artifacts/AppTimeTracker-1.1.3
 ```
 
-生成的 EXE、DLL 和运行环境文件需要一起分发。测试、旧版 PowerShell/BAT 脚本、开发过程记录、SDK 缓存和发布产物不包含在本仓库中。
+生成的 EXE、DLL 和运行环境文件需要一起分发。旧版 PowerShell/BAT 脚本、开发过程记录、SDK 缓存和发布产物不包含在本仓库中。
+
+Linux 可使用 .NET 10 SDK 交叉构建和发布，在上述 restore、build、publish 命令中添加 `-p:EnableWindowsTargeting=true`。窗口、托盘及 Windows 会话监控仍需在 Windows 运行验证。
+
+核心回归测试可在 Linux 或 Windows 运行：
+
+```sh
+dotnet restore tests/AppTimeTracker.Regression/AppTimeTracker.Regression.csproj --configfile NuGet.Config
+dotnet run --project tests/AppTimeTracker.Regression/AppTimeTracker.Regression.csproj -c Release --no-restore
+```
+
+测试说明及范围见 [核心回归测试](tests/AppTimeTracker.Regression/README.md)。

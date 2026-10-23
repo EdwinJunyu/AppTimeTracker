@@ -203,14 +203,54 @@ public sealed class AppEditor : Form
     }
 }
 
+public sealed class SessionNoteEditor : Form
+{
+    private readonly TextBox note=new() { Dock=DockStyle.Fill,Multiline=true,AcceptsReturn=true,ScrollBars=ScrollBars.Vertical,MaxLength=0,AccessibleName="备注" };
+    private readonly Label error=Ui.Muted("");
+    public SessionNoteEditor(UsageSession session,Action<string,string> saveNote)
+    {
+        Ui.Style(this);Text="编辑计时备注";Size=new Size(720,540);MinimumSize=new Size(520,420);StartPosition=FormStartPosition.CenterParent;
+        var original=session.Note;
+        var root=new TableLayoutPanel { Dock=DockStyle.Fill,ColumnCount=1,RowCount=4,Padding=new Padding(24),BackColor=Color.Transparent };
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute,120));root.RowStyles.Add(new RowStyle(SizeType.Percent,100));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute,58));root.RowStyles.Add(new RowStyle(SizeType.Absolute,56));
+        var header=new FlowLayoutPanel { Dock=DockStyle.Fill,FlowDirection=FlowDirection.TopDown,WrapContents=false,BackColor=Color.Transparent,Margin=Padding.Empty };
+        header.Controls.Add(Ui.Title("计时备注",20));
+        var context=Ui.Muted(session.Name+" · 开始于 "+session.Start.ToString("yyyy-MM-dd HH:mm:ss zzz"));context.AutoSize=false;context.Height=48;context.Margin=Padding.Empty;context.AutoEllipsis=true;header.Controls.Add(context);
+        var hint=Ui.Muted("记录这段时间做了什么，可留空。点击“保存备注”后生效。");hint.AutoSize=false;hint.Height=36;hint.Margin=Padding.Empty;header.Controls.Add(hint);
+        header.SizeChanged+=(_,_)=>{context.Width=Math.Max(0,header.ClientSize.Width);hint.Width=context.Width;};
+        var surface=Ui.Surface();surface.Dock=DockStyle.Fill;surface.Controls.Add(note);
+        note.Text=original;note.TabIndex=0;
+        error.Dock=DockStyle.Fill;error.AutoSize=false;error.Padding=new Padding(0,6,0,0);error.AccessibleName="备注保存状态";
+        error.ForeColor=SystemInformation.HighContrast?SystemColors.WindowText:Color.Firebrick;
+        var actions=new FlowLayoutPanel { Dock=DockStyle.Fill,FlowDirection=FlowDirection.RightToLeft,WrapContents=false,BackColor=Color.Transparent,Margin=Padding.Empty };
+        var cancel=Ui.Button("取消",(_,_)=>Close());CancelButton=cancel;
+        var save=Ui.PrimaryButton("保存备注",(_,_)=>
+        {
+            try { saveNote(session.Id,note.Text);DialogResult=DialogResult.OK;Close(); }
+            catch(Exception ex){error.Text="备注未保存，请重试："+ex.Message;note.Focus();}
+        });
+        actions.Controls.Add(cancel);actions.Controls.Add(save);
+        root.Controls.Add(header,0,0);root.Controls.Add(surface,0,1);root.Controls.Add(error,0,2);root.Controls.Add(actions,0,3);Controls.Add(root);
+        // 不设置回车提交：原生多行输入保留换行和中文输入法的确认键。
+        Shown+=(_,_)=>note.Focus();
+        FormClosing+=(_,e)=>
+        {
+            if(DialogResult==DialogResult.OK||note.Text==original)return;
+            if(MessageBox.Show(this,"放弃尚未保存的备注修改？","放弃修改",MessageBoxButtons.YesNo,MessageBoxIcon.Question,MessageBoxDefaultButton.Button2)!=DialogResult.Yes)e.Cancel=true;
+        };
+    }
+}
+
 public sealed class HistoryForm : Form
 {
     private readonly Func<List<UsageSession>> snapshot;
+    private readonly Action<string,string> saveNote;
     private readonly ComboBox apps=new() { DropDownStyle=ComboBoxStyle.DropDownList,Width=195,AccessibleName="筛选软件" };
     private readonly DateTimePicker from=new() { Format=DateTimePickerFormat.Custom,CustomFormat="yyyy-MM-dd",Width=135,Value=DateTime.Today.AddDays(-30),AccessibleName="起始日期" };
     private readonly DateTimePicker to=new() { Format=DateTimePickerFormat.Custom,CustomFormat="yyyy-MM-dd",Width=135,AccessibleName="结束日期" };
     private readonly DataGridView grid=Ui.Grid();
-    private readonly Label pageLabel=new() { AutoSize=true,Padding=new Padding(8,12,4,4),BackColor=Color.Transparent,AccessibleName="历史分页状态" };
+    private readonly Label pageLabel=new() { AutoSize=false,Width=360,Height=48,AutoEllipsis=true,TextAlign=ContentAlignment.MiddleLeft,Padding=new Padding(8,0,4,0),BackColor=Color.Transparent,AccessibleName="历史分页状态" };
     private readonly Label rangeNote=Ui.Muted("");
     private readonly Label empty=Ui.Muted("");
     private readonly FlowLayoutPanel dateRange=new() { AutoSize=true,AutoSizeMode=AutoSizeMode.GrowAndShrink,WrapContents=false,BackColor=Color.Transparent,Margin=Padding.Empty };
@@ -219,12 +259,13 @@ public sealed class HistoryForm : Form
     private readonly Button export;
     private readonly Button previous;
     private readonly Button next;
+    private readonly Button editNote;
     private string mode="detail";
     private int page;
     private bool ready;
-    public HistoryForm(Func<List<UsageSession>> snapshot,List<TrackedApp> allApps,string? selected)
+    public HistoryForm(Func<List<UsageSession>> snapshot,List<TrackedApp> allApps,Action<string,string> saveNote)
     {
-        this.snapshot=snapshot;Ui.Style(this);Text="历史与导出";Size=new Size(1120,760);MinimumSize=new Size(960,660);
+        this.snapshot=snapshot;this.saveNote=saveNote;Ui.Style(this);Text="历史与导出";Size=new Size(1120,760);MinimumSize=new Size(960,660);
         var root=new TableLayoutPanel { Dock=DockStyle.Fill,RowCount=6,ColumnCount=1,Padding=new Padding(24),BackColor=Color.Transparent };
         root.RowStyles.Add(new RowStyle(SizeType.Absolute,88));root.RowStyles.Add(new RowStyle(SizeType.Absolute,56));root.RowStyles.Add(new RowStyle(SizeType.Absolute,76));
         root.RowStyles.Add(new RowStyle(SizeType.Percent,100));root.RowStyles.Add(new RowStyle(SizeType.Absolute,44));root.RowStyles.Add(new RowStyle(SizeType.Absolute,60));
@@ -238,8 +279,8 @@ public sealed class HistoryForm : Form
         // 已移出配置的软件仍可按历史 ID 筛选；现有配置名称优先，软件名称相同也不合并 ID。
         var options=allApps.GroupBy(a=>a.Id).Select(g=>g.First()).ToList();
         foreach(var row in Csv.Lifetime(snapshot()))if(options.All(a=>a.Id!=row.AppId))options.Add(new TrackedApp { Id=row.AppId,Name=row.Name,Removed=true });
-        apps.Items.Add("全部软件");foreach(var app in options)apps.Items.Add(app);apps.SelectedIndex=0;
-        if(selected!=null)apps.SelectedItem=options.FirstOrDefault(a=>a.Id==selected)??(object)"全部软件";
+        // 每次打开都从所有软件开始，不继承主页选中项或上次筛选。
+        apps.Items.Add("所有软件");foreach(var app in options)apps.Items.Add(app);apps.SelectedIndex=0;
         var filters=new TableLayoutPanel { Dock=DockStyle.Fill,ColumnCount=2,RowCount=1,Margin=Padding.Empty,BackColor=Color.Transparent };
         filters.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));filters.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,210));
         // 必须显式限制筛选行。默认 AutoSize 行会被内部流式容器的首选高度撑大，使导出按钮越过表格边界。
@@ -262,7 +303,10 @@ public sealed class HistoryForm : Form
         rangeNote.Dock=DockStyle.Fill;rangeNote.AutoSize=false;rangeNote.Padding=new Padding(2,12,0,0);
         var paging=new FlowLayoutPanel { Dock=DockStyle.Fill,BackColor=Color.Transparent,WrapContents=false,Margin=Padding.Empty };
         previous=Ui.Button("上一页",(_,_)=>{page=Math.Max(0,page-1);RefreshRows();});next=Ui.Button("下一页",(_,_)=>{page++;RefreshRows();});
-        var refresh=Ui.Button("刷新记录",(_,_)=>{page=0;RefreshRows();});paging.Controls.AddRange([previous,next,pageLabel,refresh]);
+        var refresh=Ui.Button("刷新记录",(_,_)=>{page=0;RefreshRows();});
+        editNote=Ui.Button("编辑备注…",(_,_)=>EditNote());paging.Controls.AddRange([previous,next,refresh,editNote,pageLabel]);
+        grid.SelectionChanged+=(_,_)=>UpdateNoteButton();
+        grid.CellDoubleClick+=(_,e)=>{if(e.RowIndex>=0&&mode=="detail")EditNote();};
         root.Controls.Add(header,0,0);root.Controls.Add(segments,0,1);root.Controls.Add(filters,0,2);root.Controls.Add(table,0,3);root.Controls.Add(rangeNote,0,4);root.Controls.Add(paging,0,5);Controls.Add(root);
         apps.SelectedIndexChanged+=(_,_)=>FiltersChanged();from.ValueChanged+=(_,_)=>FiltersChanged();to.ValueChanged+=(_,_)=>FiltersChanged();
         ready=true;SetMode("detail");
@@ -275,10 +319,23 @@ public sealed class HistoryForm : Form
         dateRange.Visible=mode!="lifetime";from.Enabled=mode!="lifetime";to.Enabled=mode!="lifetime";allRange.Visible=mode=="lifetime";
         export.Text="导出"+(mode=="lifetime"?"累计汇总":mode=="daily"?"每日汇总":"会话明细")+" CSV";export.AccessibleName=export.Text;
         grid.Columns.Clear();
-        var titles=mode=="lifetime"?new[]{"软件","首次记录","最近记录","会话数","总时长"}:mode=="daily"?new[]{"日期","软件","有效时长","会话数","总时长"}:new[]{"软件","开始时间","结束时间","有效时长","总时长","状态 / 结束原因"};
+        var titles=mode=="lifetime"?new[]{"软件","首次记录","最近记录","会话数","总时长","备注"}:mode=="daily"?new[]{"日期","软件","有效时长","会话数","总时长","备注"}:new[]{"软件","开始时间","结束时间","有效时长","总时长","状态 / 结束原因","备注"};
         foreach(var title in titles)Ui.Column(grid,title,title.Contains("时间")||title.Contains("记录")?145:100);
         foreach(DataGridViewColumn column in grid.Columns)if(column.HeaderText.Contains("时间")||column.HeaderText.Contains("记录"))column.MinimumWidth=mode=="detail"?220:175;
+        grid.Columns[^1].MinimumWidth=200;grid.Columns[^1].FillWeight=180;
         RefreshRows();
+    }
+    private void UpdateNoteButton()
+    {
+        editNote.Enabled=mode=="detail"&&grid.SelectedRows.Count>0&&grid.SelectedRows[0].Tag is string;
+        editNote.AccessibleDescription=mode=="detail"?"编辑选中计时记录的备注。":"请切换到会话明细，选择一次计时后编辑备注。";
+    }
+    private void EditNote()
+    {
+        if(mode!="detail"||grid.SelectedRows.Count==0||grid.SelectedRows[0].Tag is not string id)return;
+        var session=snapshot().FirstOrDefault(s=>s.Id==id);if(session==null){RefreshRows();return;}
+        using var editor=new SessionNoteEditor(session,saveNote);
+        if(editor.ShowDialog(this)==DialogResult.OK){RefreshRows(id);pageLabel.Text+=" · 备注已保存";}
     }
     private List<UsageSession> Filtered()
     {
@@ -291,32 +348,39 @@ public sealed class HistoryForm : Form
     {
         if(from.Value.Date>to.Value.Date)throw new ArgumentException("结束日期不能早于开始日期，请调整日期范围。");
     }
-    private void RefreshRows()
+    private void RefreshRows(string? selectedId=null)
     {
         try
         {
             if(mode!="lifetime")ValidateDates();
             // 预览和导出均按软件 ID 累计，日期只影响明细或每日片段，不改变总时长。
-            var all=Csv.Latest(snapshot());var id=(apps.SelectedItem as TrackedApp)?.Id;var totals=Csv.Lifetime(all).ToDictionary(x=>x.AppId,x=>x.Seconds);var display=new List<object[]>();
+            var all=Csv.Latest(snapshot());var id=(apps.SelectedItem as TrackedApp)?.Id;var totals=Csv.Lifetime(all).ToDictionary(x=>x.AppId,x=>x.Seconds);var display=new List<object[]>();var sessionIds=new List<string>();
             if(mode=="lifetime")
-                foreach(var row in Csv.Lifetime(all,id))display.Add([row.Name,row.FirstRecorded.ToString("yyyy-MM-dd HH:mm:ss"),row.LastRecorded.ToString("yyyy-MM-dd HH:mm:ss"),row.SessionCount,Csv.Duration(row.Seconds)]);
+                foreach(var row in Csv.Lifetime(all,id))display.Add([row.Name,row.FirstRecorded.ToString("yyyy-MM-dd HH:mm:ss"),row.LastRecorded.ToString("yyyy-MM-dd HH:mm:ss"),row.SessionCount,Csv.Duration(row.Seconds),row.Note]);
             else if(mode=="daily")
             {
                 var first=DateOnly.FromDateTime(from.Value);var last=DateOnly.FromDateTime(to.Value);
                 var groups=all.Where(s=>id==null||s.AppId==id).SelectMany(s=>s.Segments.Select(p=>new {Session=s,Segment=p}))
                     .Where(x=>DateOnly.ParseExact(x.Segment.Day,"yyyy-MM-dd",CultureInfo.InvariantCulture)>=first&&DateOnly.ParseExact(x.Segment.Day,"yyyy-MM-dd",CultureInfo.InvariantCulture)<=last)
                     .GroupBy(x=>new {x.Segment.Day,x.Session.AppId}).OrderByDescending(x=>x.Key.Day).ThenBy(x=>x.Key.AppId);
-                foreach(var row in groups)display.Add([row.Key.Day,row.OrderBy(x=>x.Session.LastObserved).Last().Session.Name,Csv.Duration(row.Sum(x=>x.Segment.Seconds)),row.Select(x=>x.Session.Id).Distinct().Count(),Csv.Duration(totals[row.Key.AppId])]);
+                foreach(var row in groups)display.Add([row.Key.Day,row.OrderBy(x=>x.Session.LastObserved).Last().Session.Name,Csv.Duration(row.Sum(x=>x.Segment.Seconds)),row.Select(x=>x.Session.Id).Distinct().Count(),Csv.Duration(totals[row.Key.AppId]),Csv.SingleSessionNote(row.Select(x=>x.Session))]);
             }
             else
                 foreach(var s in Csv.Filter(all.Where(s=>id==null||s.AppId==id),DateOnly.FromDateTime(from.Value),DateOnly.FromDateTime(to.Value)).OrderByDescending(s=>s.Start))
-                    display.Add([s.Name,s.Start.ToString("yyyy-MM-dd HH:mm:ss zzz"),s.End?.ToString("yyyy-MM-dd HH:mm:ss zzz")??"进行中",Csv.Duration(s.Seconds),Csv.Duration(totals[s.AppId]),s.End==null?"进行中":Csv.Reason(s.Reason)]);
-            page=Math.Clamp(page,0,Math.Max(0,(display.Count-1)/50));grid.Rows.Clear();foreach(var row in display.Skip(page*50).Take(50))grid.Rows.Add(row);
+                { sessionIds.Add(s.Id);display.Add([s.Name,s.Start.ToString("yyyy-MM-dd HH:mm:ss zzz"),s.End?.ToString("yyyy-MM-dd HH:mm:ss zzz")??"进行中",Csv.Duration(s.Seconds),Csv.Duration(totals[s.AppId]),s.End==null?"进行中":Csv.Reason(s.Reason),s.Note]); }
+            page=Math.Clamp(page,0,Math.Max(0,(display.Count-1)/50));grid.Rows.Clear();
+            foreach(var i in Enumerable.Range(page*50,Math.Min(50,display.Count-page*50)))
+            {
+                var index=grid.Rows.Add(display[i]);
+                if(mode=="detail"){grid.Rows[index].Tag=sessionIds[i];if(sessionIds[i]==selectedId){grid.CurrentCell=grid.Rows[index].Cells[0];grid.Rows[index].Selected=true;}}
+            }
+            UpdateNoteButton();
             empty.Text=mode=="lifetime"?"还没有累计记录。添加软件并开始使用后，记录会显示在这里。":"此范围没有记录，请调整日期或软件筛选。";empty.Visible=display.Count==0;if(empty.Visible)empty.BringToFront();
             previous.Enabled=page>0;next.Enabled=(page+1)*50<display.Count;export.Enabled=true;
             pageLabel.Text=display.Count==0?"共 0 条记录":$"第 {page+1} / {(display.Count+49)/50} 页 · 共 {display.Count} 条（每页 50 条）";
             rangeNote.ForeColor=SystemInformation.HighContrast?SystemColors.WindowText:Ui.MutedInk;
-            rangeNote.Text=mode=="lifetime"?"每个软件一行，包含全部历史，不受日期筛选影响。时长格式为 HH:mm:ss。":"总时长为该软件自首次记录以来的有效累计，不是当前日期范围的小计。";
+            rangeNote.Text=mode=="detail"?"总时长为软件全部有效累计。选择记录后可编辑备注，CSV 同步导出。":
+                (mode=="lifetime"?"累计包含全部历史。":"总时长为全部有效累计。")+"多次计时的汇总行备注留空，请到“会话明细”查看或编辑。";
         }
         catch(Exception ex)
         {
@@ -324,6 +388,7 @@ public sealed class HistoryForm : Form
             grid.Rows.Clear();empty.Text=ex.Message;empty.Visible=true;empty.BringToFront();pageLabel.Text="请调整筛选条件后重试";
             rangeNote.Text=ex.Message;rangeNote.ForeColor=SystemInformation.HighContrast?SystemColors.WindowText:Color.Firebrick;
             previous.Enabled=false;next.Enabled=false;export.Enabled=false;
+            UpdateNoteButton();
         }
     }
     private void ExportCurrent()

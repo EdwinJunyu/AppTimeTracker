@@ -14,8 +14,9 @@ public static class Csv
     public static string Number(double seconds) => seconds.ToString("F2",CultureInfo.InvariantCulture);
     public static string Cell(string value)
     {
-        // 防止用户填写的软件名称被 Excel 当成公式执行。
-        if(value.Length>0 && "=+-@\t\r".Contains(value[0])) value="'"+value;
+        // 软件名称和自由填写的备注都可能包含公式；前导空白不能绕过保护。
+        var first=value.TrimStart();
+        if(value.Length>0 && ("\t\r\n".Contains(value[0]) || first.Length>0 && "=+-@".Contains(first[0]))) value="'"+value;
         return "\""+value.Replace("\"","\"\"")+"\"";
     }
     public static string Reason(string reason) => reason switch {
@@ -25,11 +26,18 @@ public static class Csv
     public static List<UsageSession> Latest(IEnumerable<UsageSession> sessions) => sessions
         .GroupBy(s => s.Id).Select(g => g.OrderBy(s => s.LastObserved).Last()).ToList();
 
-    public static List<(string AppId, string Name, DateTimeOffset FirstRecorded, DateTimeOffset LastRecorded, int SessionCount, double Seconds)> Lifetime(IEnumerable<UsageSession> sessions, string? appId = null) => Latest(sessions)
+    // 备注属于一次计时；汇总多次计时时留空，不拼接或任选一条冒充整行备注。
+    public static string SingleSessionNote(IEnumerable<UsageSession> sessions)
+    {
+        var rows=Latest(sessions);
+        return rows.Count==1?rows[0].Note:"";
+    }
+
+    public static List<(string AppId, string Name, DateTimeOffset FirstRecorded, DateTimeOffset LastRecorded, int SessionCount, double Seconds, string Note)> Lifetime(IEnumerable<UsageSession> sessions, string? appId = null) => Latest(sessions)
         .Where(s => appId == null || s.AppId == appId).GroupBy(s => s.AppId)
         .Select(g => (AppId: g.Key, Name: g.OrderBy(s => s.LastObserved).Last().Name,
             FirstRecorded: g.Min(s => s.Start), LastRecorded: g.Max(s => s.End ?? s.LastObserved),
-            SessionCount: g.Count(), Seconds: g.Sum(s => s.Seconds)))
+            SessionCount: g.Count(), Seconds: g.Sum(s => s.Seconds), Note: SingleSessionNote(g)))
         .OrderByDescending(s => s.Seconds).ThenBy(s => s.AppId, StringComparer.Ordinal).ToList();
 
     public static void Export(string path, IEnumerable<UsageSession> sessions, bool daily, DateOnly from, DateOnly to, string? appId)
@@ -41,27 +49,27 @@ public static class Csv
         void Row(params string[] cells) => writer.WriteLine(string.Join(",",cells.Select(Cell)));
         if(daily)
         {
-            Row("日期","软件ID","软件名称","计时类型","有效时长","会话数","总时长");
+            Row("日期","软件ID","软件名称","计时类型","有效时长","会话数","总时长","备注");
             var groups=rows.SelectMany(s=>s.Segments.Select(p=>new {Session=s,Segment=p}))
                 .Where(x=>DateOnly.ParseExact(x.Segment.Day,"yyyy-MM-dd",CultureInfo.InvariantCulture)>=from && DateOnly.ParseExact(x.Segment.Day,"yyyy-MM-dd",CultureInfo.InvariantCulture)<=to)
                 .GroupBy(x=>new {x.Segment.Day,x.Session.AppId}).OrderBy(x=>x.Key.Day);
-            foreach(var g in groups) { var seconds=g.Sum(x=>x.Segment.Seconds); Row(g.Key.Day,g.Key.AppId,g.OrderBy(x=>x.Session.LastObserved).Last().Session.Name,"窗口打开时长",Duration(seconds),g.Select(x=>x.Session.Id).Distinct().Count().ToString(CultureInfo.InvariantCulture),Duration(totals[g.Key.AppId])); }
+            foreach(var g in groups) { var seconds=g.Sum(x=>x.Segment.Seconds); Row(g.Key.Day,g.Key.AppId,g.OrderBy(x=>x.Session.LastObserved).Last().Session.Name,"窗口打开时长",Duration(seconds),g.Select(x=>x.Session.Id).Distinct().Count().ToString(CultureInfo.InvariantCulture),Duration(totals[g.Key.AppId]),SingleSessionNote(g.Select(x=>x.Session))); }
         }
         else
         {
-            Row("会话ID","软件ID","软件名称","启动路径","监控路径列表","计时类型","开始时间","结束时间","时区","有效时长","已确认暂停时长","状态","结束原因","异常恢复","总时长");
+            Row("会话ID","软件ID","软件名称","启动路径","监控路径列表","计时类型","开始时间","结束时间","时区","有效时长","已确认暂停时长","状态","结束原因","异常恢复","总时长","备注");
             foreach(var s in Filter(rows,from,to).OrderBy(s=>s.Start))
-                Row(s.Id,s.AppId,s.Name,s.LaunchPath,string.Join(" | ",s.MonitorPaths),"窗口打开时长",s.Start.ToString("o"),s.End?.ToString("o")??"",s.TimeZoneId,Duration(s.Seconds),s.PausedSeconds.HasValue?Duration(s.PausedSeconds.Value):"",s.End.HasValue?"已结束":"进行中",Reason(s.Reason),s.Recovered?"是":"否",Duration(totals[s.AppId]));
+                Row(s.Id,s.AppId,s.Name,s.LaunchPath,string.Join(" | ",s.MonitorPaths),"窗口打开时长",s.Start.ToString("o"),s.End?.ToString("o")??"",s.TimeZoneId,Duration(s.Seconds),s.PausedSeconds.HasValue?Duration(s.PausedSeconds.Value):"",s.End.HasValue?"已结束":"进行中",Reason(s.Reason),s.Recovered?"是":"否",Duration(totals[s.AppId]),s.Note);
         }
     }
     public static void ExportLifetime(string path, IEnumerable<UsageSession> sessions, string? appId)
     {
         using var writer=new StreamWriter(path,false,new UTF8Encoding(true));
         void Row(params string[] cells) => writer.WriteLine(string.Join(",",cells.Select(Cell)));
-        Row("软件ID","软件名称","计时类型","首次记录时间","最近记录时间","会话数","总时长");
+        Row("软件ID","软件名称","计时类型","首次记录时间","最近记录时间","会话数","总时长","备注");
         // 不接受日期参数，确保累计导出包含已移出软件和仍在进行的会话。
         foreach(var s in Lifetime(sessions,appId))
-            Row(s.AppId,s.Name,"窗口打开时长",s.FirstRecorded.ToString("o"),s.LastRecorded.ToString("o"),s.SessionCount.ToString(CultureInfo.InvariantCulture),Duration(s.Seconds));
+            Row(s.AppId,s.Name,"窗口打开时长",s.FirstRecorded.ToString("o"),s.LastRecorded.ToString("o"),s.SessionCount.ToString(CultureInfo.InvariantCulture),Duration(s.Seconds),s.Note);
     }
     // 明细返回与日期范围重叠的完整会话；每日汇总仅返回选定日期的片段。
     public static IEnumerable<UsageSession> Filter(IEnumerable<UsageSession> sessions, DateOnly from, DateOnly to) => sessions.Where(s=>

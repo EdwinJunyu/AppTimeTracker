@@ -65,8 +65,14 @@ public sealed class Store : IDisposable
             var result = new Dictionary<string,UsageSession>();
             using (var c = connection.CreateCommand())
             {
-                c.CommandText = "SELECT Id,Payload FROM Sessions"; using var r = c.ExecuteReader();
-                while(r.Read()) result.Add(r.GetString(0), JsonSerializer.Deserialize<UsageSession>(r.GetString(1))!);
+                c.CommandText = "SELECT rowid,Id,Payload FROM Sessions ORDER BY rowid"; using var r = c.ExecuteReader();
+                while(r.Read())
+                {
+                    var session=JsonSerializer.Deserialize<UsageSession>(r.GetString(2))!;
+                    // 旧数据没有创建序号，沿用稳定的入库顺序；更新备注不会改变 rowid。
+                    if(session.CreationOrder==0)session.CreationOrder=r.GetInt64(0);
+                    result.Add(r.GetString(1),session);
+                }
             }
             using (var c = connection.CreateCommand())
             {

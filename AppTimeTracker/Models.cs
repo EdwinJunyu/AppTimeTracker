@@ -38,8 +38,10 @@ public sealed class TimeSegment
 public sealed class UsageSession
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public long CreationOrder { get; set; }
     public string AppId { get; set; } = "";
     public string Name { get; set; } = "";
+    public string Note { get; set; } = "";
     public string LaunchPath { get; set; } = "";
     public List<string> MonitorPaths { get; set; } = [];
     public DateTimeOffset Start { get; set; }
@@ -55,9 +57,19 @@ public sealed class UsageSession
     // 后台写入必须持有独立快照；采样线程仍可继续更新原会话，不能共享可变区间。
     public UsageSession Snapshot() => new()
     {
-        Id=Id,AppId=AppId,Name=Name,LaunchPath=LaunchPath,MonitorPaths=[..MonitorPaths],
+        Id=Id,CreationOrder=CreationOrder,AppId=AppId,Name=Name,LaunchPath=LaunchPath,MonitorPaths=[..MonitorPaths],
         Start=Start,End=End,LastObserved=LastObserved,TimeZoneId=TimeZoneId,
-        PausedSeconds=PausedSeconds,Reason=Reason,Recovered=Recovered,
+        PausedSeconds=PausedSeconds,Reason=Reason,Recovered=Recovered,Note=Note,
         Segments=Segments.Select(p=>new TimeSegment {Start=p.Start,End=p.End,Day=p.Day,Seconds=p.Seconds}).ToList()
     };
+
+    // 墙钟可回拨；主页显示与编辑共用创建顺序索引，不按开始时间猜测最近一次。
+    public static Dictionary<string,UsageSession> RecentByApp(IEnumerable<UsageSession> sessions)
+    {
+        var recent=new Dictionary<string,UsageSession>();
+        foreach(var session in sessions)
+            if(!recent.TryGetValue(session.AppId,out var previous)||session.CreationOrder>=previous.CreationOrder)
+                recent[session.AppId]=session;
+        return recent;
+    }
 }

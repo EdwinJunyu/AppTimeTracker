@@ -9,7 +9,13 @@ public sealed class Tracker
     private double previousTick;
     private bool wasPaused;
     private bool newSegment;
+    private long nextCreationOrder;
     public bool Changed { get; private set; }
+
+    public Tracker(IEnumerable<UsageSession>? history=null)
+    {
+        if(history!=null)nextCreationOrder=history.Select(s=>s.CreationOrder).DefaultIfEmpty().Max();
+    }
 
     public void Observe(IEnumerable<TrackedApp> apps, ISet<string> paths, DateTimeOffset wall, double tick, bool paused)
     {
@@ -40,7 +46,7 @@ public sealed class Tracker
             }
             else if (exists && !Active.ContainsKey(app.Id))
             {
-                var session = new UsageSession { AppId = app.Id, Name = app.Name, LaunchPath = app.LaunchPath,
+                var session = new UsageSession { CreationOrder = checked(++nextCreationOrder), AppId = app.Id, Name = app.Name, LaunchPath = app.LaunchPath,
                     MonitorPaths = [.. app.MonitorPaths], Start = wall, LastObserved = wall };
                 Active[app.Id] = session;
                 Pending[session.Id] = session;
