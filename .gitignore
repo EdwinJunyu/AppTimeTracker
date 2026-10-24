@@ -2,6 +2,7 @@
 # 核心回归测试随源码保留；旧脚本、构建缓存和发布产物保留本地。
 /*
 !/.gitignore
+!/.github/
 !/README.md
 !/CHANGELOG.md
 !/NuGet.Config
